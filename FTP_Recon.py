@@ -17,13 +17,22 @@ lock = threading.Lock()
 
 def print_banner():
     f = Figlet(font='small')
-    banner = f.renderText('DEFAULT FTP SLAYER')
+    banner = f.renderText('ANONYMOUS FTP SLAYER')
     print(f"{Fore.MAGENTA}{banner}{Style.RESET_ALL}")
 
 def run_subfinder(domain, output_file):
     print(f"{Fore.CYAN}[+] Running subfinder for domain: {domain}")
     try:
-        subprocess.run(["subfinder", "-d", domain, "-o", output_file], check=True)
+        subprocess.run(
+            ["subfinder", "-all", "-silent", "-d", domain, "-o", output_file],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        # Count lines
+        with open(output_file) as f:
+            count = sum(1 for _ in f)
+        print(f"{Fore.BLUE}[+] Subfinder found {count} subdomains")
     except subprocess.CalledProcessError as e:
         print(f"{Fore.RED}[-] subfinder failed: {e}")
         exit(1)
@@ -31,7 +40,16 @@ def run_subfinder(domain, output_file):
 def run_httpx(input_file, output_file):
     print(f"{Fore.CYAN}[+] Running httpx to find live hosts")
     try:
-        subprocess.run(["httpx", "-silent", "-ip", "-l", input_file, "-o", output_file], check=True)
+        subprocess.run(
+            ["httpx", "-silent", "-ip", "-l", input_file, "-o", output_file],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        # Count lines
+        with open(output_file) as f:
+            count = sum(1 for _ in f)
+        print(f"{Fore.BLUE}[+] Httpx found {count} live hosts")
     except subprocess.CalledProcessError as e:
         print(f"{Fore.RED}[-] httpx failed: {e}")
         exit(1)
@@ -43,7 +61,7 @@ def extract_ips(httpx_file):
             for line in f:
                 parts = line.strip().split(" ")
                 if len(parts) >= 2:
-                    ip = parts[-1]
+                    ip = parts[-1].strip("[]")  # ✅ Clean brackets if present
                     ips.add(ip)
     except FileNotFoundError:
         print(f"{Fore.RED}[-] httpx output file not found")
@@ -96,7 +114,8 @@ def main():
     if args.domain:
         subdomains_file = f"output/{args.domain}_subdomains.txt"
         httpx_file = f"output/{args.domain}_livehosts.txt"
-        ftp_success_file = f"output/{args.domain}_ftp_anonymous.txt"
+        ftp_success_file = f"output/{args.domain}_ftp_hits.txt"
+        all_ips_file = f"output/{args.domain}_ftp_allips.txt"
 
         run_subfinder(args.domain, subdomains_file)
         run_httpx(subdomains_file, httpx_file)
@@ -105,7 +124,8 @@ def main():
 
     elif args.url:
         httpx_file = f"output/single_url_livehosts.txt"
-        ftp_success_file = f"output/single_url_ftp_anonymous.txt"
+        ftp_success_file = f"output/single_url_ftp_hits.txt"
+        all_ips_file = f"output/single_url_ftp_allips.txt"
 
         with open("temp_url.txt", "w") as f:
             f.write(args.url)
@@ -116,7 +136,8 @@ def main():
 
     elif args.ip:
         ips = {args.ip}
-        ftp_success_file = f"output/single_ip_ftp_anonymous.txt"
+        ftp_success_file = f"output/single_ip_ftp_hits.txt"
+        all_ips_file = f"output/single_ip_ftp_allips.txt"
 
     else:
         print(f"{Fore.RED}[-] Please provide --domain, --url, or --ip")
@@ -124,6 +145,13 @@ def main():
         exit(1)
 
     print(f"{Fore.CYAN}[+] Total unique IPs to check: {len(ips)}")
+
+    # ✅ Save all extracted IPs (one IP per line, clean)
+    with open(all_ips_file, "w") as f:
+        for ip in ips:
+            f.write(ip + "\n")
+
+    print(f"{Fore.GREEN}[+] All extracted IPs saved in {all_ips_file}")
 
     ip_queue = queue.Queue()
     for ip in ips:
